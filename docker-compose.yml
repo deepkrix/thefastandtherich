@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: tfatr-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tfatr
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: tfatr-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api-server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.api
+    container_name: tfatr-api
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/tfatr?sslmode=disable
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-in-production-min-32-chars}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me-too-min-32}
+      SERVER_PORT: 8080
+      ENV: development
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: ["go", "run", "cmd/api/main.go"]
+
+  game-server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.game
+    container_name: tfatr-game
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/tfatr?sslmode=disable
+      REDIS_ADDR: redis:6379
+      GAME_SERVER_PORT: 8081
+      ENV: development
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: ["go", "run", "cmd/game/main.go"]
+
+volumes:
+  postgres_data:
+  redis_data:
